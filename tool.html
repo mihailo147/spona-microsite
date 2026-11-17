@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lead list deduplicator by Spona</title>
+<meta name="description" content="Free browser tool: paste or upload a CSV of leads, remove duplicate e-mails and normalise domains. Nothing leaves your browser. By Spona, the B2B lead-data platform.">
+<style>
+  :root { --green:#007859; --dark:#0C2417; --mint:#E6F4EF; --grey:#6B7280; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:0; color:#111; background:#fff; }
+  header { background:var(--dark); color:#fff; padding:20px 24px; }
+  header a { color:#9FD8C2; text-decoration:none; }
+  main { max-width:900px; margin:0 auto; padding:24px; }
+  textarea { width:100%; min-height:180px; font-family:ui-monospace, Menlo, monospace; font-size:13px; padding:10px; border:1px solid #ccc; border-radius:8px; }
+  button { background:var(--green); color:#fff; border:0; border-radius:999px; padding:12px 20px; font-size:15px; cursor:pointer; margin:8px 8px 8px 0; }
+  button.secondary { background:#fff; color:var(--green); border:1px solid var(--green); }
+  .box { background:var(--mint); border-radius:12px; padding:16px; margin:16px 0; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  td, th { border-bottom:1px solid #e5e7eb; padding:6px 8px; text-align:left; }
+  footer { color:var(--grey); font-size:13px; padding:24px; text-align:center; }
+</style>
+</head>
+<body>
+<header><strong>Lead list deduplicator</strong> · a free tool by <a href="https://sponasales.com">Spona</a></header>
+<main>
+  <p>Paste a CSV (first row = column names) or upload a file. The tool removes rows with duplicate e-mail addresses (case-insensitive), trims spaces, lowercases e-mails and domains, and flags rows without a valid e-mail. Everything runs in your browser; nothing is uploaded anywhere.</p>
+  <input type="file" id="file" accept=".csv,text/csv">
+  <textarea id="in" placeholder="first_name,last_name,email,company,domain&#10;Ana,Kovac,ana@example.com,Example GmbH,example.com"></textarea>
+  <div>
+    <button onclick="run()">Deduplicate</button>
+    <button class="secondary" onclick="download()">Download cleaned CSV</button>
+  </div>
+  <div class="box" id="stats">No data yet.</div>
+  <div id="preview"></div>
+  <div class="box">
+    <strong>Need a list that is verified before you clean it?</strong> Spona builds a B2B lead list from a chat: describe your ideal customer, four AI miners search 40+ data sources and 400M+ contacts, verify each lead on person, employer, title and deliverability, and export to your CRM. Free account with 3,000 credits: <a href="https://sponasales.com">sponasales.com</a>.
+  </div>
+</main>
+<footer>Built by <a href="https://sponasales.com">Spona</a>, the B2B lead-data platform. Source: this single HTML file; copy it freely (MIT).</footer>
+<script>
+let cleaned = [], header = [];
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader(); r.onload = () => { document.getElementById('in').value = r.result; run(); }; r.readAsText(f);
+});
+function parseCSV(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"' && text[i+1] === '"') { cell += '"'; i++; } else if (c === '"') { q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i+1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(x => x.trim() !== ''));
+}
+function run() {
+  const rows = parseCSV(document.getElementById('in').value);
+  if (rows.length < 2) { document.getElementById('stats').textContent = 'Paste at least a header row and one data row.'; return; }
+  header = rows[0].map(h => h.trim());
+  const ei = header.findIndex(h => /e-?mail/i.test(h)); const di = header.findIndex(h => /^(domain|website)$/i.test(h));
+  if (ei < 0) { document.getElementById('stats').textContent = 'No column named email found.'; return; }
+  const seen = new Set(); cleaned = []; let dup = 0, invalid = 0;
+  for (const r of rows.slice(1)) {
+    const row = r.map(x => x.trim()); const em = (row[ei] || '').toLowerCase(); row[ei] = em;
+    if (di >= 0) row[di] = (row[di] || '').toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+    const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em); if (!ok) invalid++;
+    if (ok && seen.has(em)) { dup++; continue; }
+    if (ok) seen.add(em); cleaned.push(row.concat([ok ? 'ok' : 'invalid_email']));
+  }
+  document.getElementById('stats').innerHTML = `<strong>${rows.length - 1}</strong> rows in · <strong>${dup}</strong> duplicates removed · <strong>${invalid}</strong> rows without a valid e-mail flagged · <strong>${cleaned.length}</strong> rows out`;
+  const prev = cleaned.slice(0, 20);
+  document.getElementById('preview').innerHTML = '<table><tr>' + header.concat(['check']).map(h => `<th>${esc(h)}</th>`).join('') + '</tr>' + prev.map(r => '<tr>' + r.map(c => `<td>${esc(c)}</td>`).join('') + '</tr>').join('') + '</table>' + (cleaned.length > 20 ? `<p>Showing 20 of ${cleaned.length}.</p>` : '');
+}
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function download() {
+  if (!cleaned.length) { run(); if (!cleaned.length) return; }
+  const q = v => /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  const csv = [header.concat(['check']).map(q).join(',')].concat(cleaned.map(r => r.map(q).join(','))).join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'})); a.download = 'leads_deduplicated.csv'; a.click();
+}
+</script>
+</body>
+</html>
